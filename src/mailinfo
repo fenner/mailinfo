@@ -1,0 +1,151 @@
+#!/usr/bin/perl -s
+#
+# $Id$
+#
+# Parse Received: headers from a message given on the command line.
+# Output an intermediate format:
+# tab-seperated fields
+# first field is message-ID
+# one field per hop, with 3 space-seperated fields: hostname, queue ID, time
+# final field of message Date: header
+
+require 'timelocal.pl';
+
+$debug = $d;
+
+%mon = ('jan', 0, 'feb', 1, 'mar', 2, 'apr', 3, 'may', 4, 'jun', 5, 'jul', 6,
+	'aug', 7, 'sep', 8, 'oct', 9, 'nov', 10, 'dec', 11);
+%tzmap = ('UT', 0, 'GMT', 0, 'EST', -500, 'EDT', -400, 'CST', -600,
+	  'CDT', -500, 'MST', -700, 'MDT', -600, 'PST', -800, 'PDT', -700);
+
+
+$prevline = "";
+$ndx = 0;
+while (<>) {
+	chop;
+	if (s/^\s+//) {
+		$prevline .= " " . $_;
+		next;
+	}
+	if ($prevline =~ /^Message-ID:\s+(<.*>)/i) {
+		$msgid = $1;
+	} elsif ($prevline =~ /^Received:/i) {
+		print("rcvd hdr: $prevline\n") if ($debug);
+		#XXX omega/alpha hack; omega thinks its name is alpha
+		#Received: from alpha.xerox.com ([13.1.64.95]) ...
+		if ($prevline =~ /from\s+alpha.xerox.com\s+\(.*\[13.1.64.95\].*\)/i) {
+			$by[$ndx + 1] = "omega.xerox.com";
+		}
+		# Get rid of parenthesis
+		$prevline =~ s/\([^)]*\)//g;
+		#!!
+		$qmail = ($& =~ /qmail/);
+		($by) = ($prevline =~ /\bby\s+([^;, 	]+)/i);
+		#XXX omega/alpha hack
+		if ($by =~ /alpha.xerox.com/i && $by[$ndx] eq "omega.xerox.com") {
+			$by = $by[$ndx];
+		}
+		($id) = ($prevline =~ /id\s+([^; ]+)/i);
+		($dat) = ($prevline =~ /; (.*)$/);
+		$by[$ndx] = $by || ($qmail ? "qmail" : "unknown");
+		$id[$ndx] = $id || "no-id";
+		$date[$ndx++] = $dat;
+		print("by $by[$ndx - 1] id $id[$ndx - 1] date $date[$ndx - 1]\n") if ($debug);
+	} elsif ($prevline =~ /^(Resent-)?Date:\s+(.*)/i) {
+print if ($debug);
+		# Resent-Date overrides the original date.  Kind of.
+		$date = $2 if ($1 || !$date);
+	}
+	last if (/^$/);
+	$prevline = $_;
+}
+print $msgid;
+$i = 0;
+while ($i < $ndx) {
+	print "\t",$by[$i]," ",$id[$i]," ",&parsedate($date[$i]);
+	$i++;
+}
+print "\tdate ",&parsedate($date);
+print "\n";
+
+# RFC822 and RFC1123 say:
+#     date-time   =  [ day "," ] date time        ; dd mm yy
+#                                                 ;  hh:mm:ss zzz
+#     
+#     day         =  "Mon"  / "Tue" /  "Wed"  / "Thu"
+#                 /  "Fri"  / "Sat" /  "Sun"
+#
+#     date        =  1*2DIGIT month 2DIGIT        ; day month year
+#                                                 ;  e.g. 20 Jun 82
+#         The syntax for the date is hereby changed to:
+#
+#            date = 1*2DIGIT month 2*4DIGIT
+#
+#     month       =  "Jan"  /  "Feb" /  "Mar"  /  "Apr"
+#                 /  "May"  /  "Jun" /  "Jul"  /  "Aug"
+#                 /  "Sep"  /  "Oct" /  "Nov"  /  "Dec"
+#     
+#     time        =  hour zone                    ; ANSI and Military
+#     
+#     hour        =  2DIGIT ":" 2DIGIT [":" 2DIGIT]
+#                                                 ; 00:00:00 - 23:59:59
+#     
+#     zone        =  "UT"  / "GMT"                ; Universal Time
+#                                                 ; North American : UT
+#                 /  "EST" / "EDT"                ;  Eastern:  - 5/ - 4
+#                 /  "CST" / "CDT"                ;  Central:  - 6/ - 5
+#                 /  "MST" / "MDT"                ;  Mountain: - 7/ - 6
+#                 /  "PST" / "PDT"                ;  Pacific:  - 8/ - 7
+#                 /  1ALPHA                       ; Military: Z = UT;
+#                                                 ;  A:-1; (J not used)
+#                                                 ;  M:-12; N:+1; Y:+12
+#                 / ( ("+" / "-") 4DIGIT )        ; Local differential
+#                                                 ;  hours+min. (HHMM)
+#
+# Some morons insert ctime output, e.g.
+# Wed Nov 26 18:28:51 1997
+# which handily has no timezone.
+
+sub parsedate {
+	local($_) = @_;
+
+	# RFC 822/1023 dates
+	s/\w+,\s+//;			# [ day "," ]
+	if (/(\d{1,2})\s+(\w+)\s+(\d{2,4})\s+(\d{1,2}):(\d{2})(:(\d{2}))?\s+(\S+)/) {
+#		print "day: $1 month: $2 year: $3 hr: $4 min: $5 sec: $7 tz: $8\n";
+		$day = $1;
+		$mon = $2;
+		$yr = $3;
+		$hr = $4;
+		$min = $5;
+		$sec = $7 || 0;
+		$tz = $tzmap{$8} || $8;
+		$tz =~ s/^[0+]+//;
+		$mon =~ s/^([A-Za-z]{3}).*$/\L$1/;
+		return -1 if (!defined($mon{$mon}));
+	# the output of "date": Thu Oct 1 22:58:52 EDT 1998
+	# Time zone may be missing
+	} elsif (/\w+\s+(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+((\w+)\s+)?(\d+)/) {
+		$mon = $1;
+		$day = $2;
+		$hr = $3;
+		$min = $4;
+		$sec = $5;
+		$yr = $8;
+		$tz = $tzmap{$7} || $7;
+		$tz =~ s/^[0+]+//;
+		$mon =~ s/^([A-Za-z]{3}).*$/\L$1/;
+		return -1 if (!defined($mon{$mon}));
+	} else {
+		return -1;
+	}
+	$yr -= 1900 if ($yr > 1900);
+	$ctime = &timegm($sec, $min, $hr, $day, $mon{$mon}, $yr);
+	if ($tz) {
+		# HHMM
+		$ctime -= ($tz / 100) * 3600 + ($tz % 100) * 60;
+	}
+#	print "day: $day month: $mon year: $yr hr: $hr min: $min sec: $sec tz: $tz\n";
+	printf("\nparsing %s into %d(%s) with tz %s\n", $_, $ctime, scalar(localtime($ctime)), $tz) if ($debug);
+	return $ctime;
+}
