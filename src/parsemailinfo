@@ -7,11 +7,15 @@
 # Use "-o" to use the date sent instead of the date received when calculating x
 # Use "-d" to calculate x in fractional days
 # Use "-t" to output in alternate format.
+# Use "-h" to do histograms; add "-d" to do histogram per day.
 #
 # $Id$
 
 @times = (31536000, 604800, 86400, 3600, 60, 1);
 @names = ('y', 'w', 'd', 'h', 'm', 's');
+
+# for histogram
+@buckets = (60, 300, 900, 1800, 3600, 10800, 21600, 43200, 86400);
 
 $dontscale = $n;
 $graphoutput = $g;
@@ -19,11 +23,12 @@ $useorigdate = $o;
 $usedays = $d;
 $debug = $x;
 $outputformat = $t;
+$histogram = $h;
 
 while (<>) {
 	chop;
 	($msgid,$_)=split(/\t/,$_,2);
-	print("message $msgid", $outputformat ? "\n" : " ") unless $graphoutput;
+	print("message $msgid", $outputformat ? "\n" : " ") unless ($graphoutput || $histogram);
 	$lastdate = 0;
 	$prevhop = "";
 	@deltas = () if ($graphoutput);
@@ -49,11 +54,13 @@ while (<>) {
 		$prevhop = $hop;
 		$prevdate = $date;
 	}
+	if ($graphoutput || ($histogram && $usedays)) {
+		($min,$hr,$day,$doy) = (localtime($useorigdate ? $origdate : $lastdate))[1,2,3,7];
+	}
 	if ($graphoutput) {
 # want hour of day in local time of lastdate (when we got it)
 # use "-o" to use origdate
 		next if (!$origdate);
-		($min,$hr,$day,$doy) = (localtime($useorigdate ? $origdate : $lastdate))[1,2,3,7];
 		if ($usedays) {
 			printf("%f", $doy + $hr / 24 + $min / 1440);
 		} else {
@@ -68,7 +75,15 @@ while (<>) {
 			}
 			hop($lastdate, "end2end", $origdate);
 		}
-		if ($outputformat) {
+		if ($histogram) {
+			for ($i = 0; $i <= $#output; $i++) {
+				if ($usedays) {
+					$histo{$output[$i][1]}{$output[$i][2]}{$i+1}{$doy}{$output[$i][0]}++;
+				} else {
+					$histo{$output[$i][1]}{$output[$i][2]}{$i+1}{$output[$i][0]}++;
+				}
+			}
+		} elsif ($outputformat) {
 			foreach $line (reverse @output) {
 				$$line[0] =~ s/([^-0-9])(\d)/$1 $2/g;
 				$$line[1] =~ s/->/ -> /;
@@ -83,13 +98,54 @@ while (<>) {
 		}
 	}
 }
+if ($histogram) {
+	# XXX
+	use Data::Dumper;
+	foreach $firsthop (sort keys %histo) {
+	    foreach $secondhop (sort keys %{$histo{$firsthop}}) {
+		foreach $hopnum (sort {$a<=>$b} keys %{$histo{$firsthop}{$secondhop}}) {
+		    print "${firsthop}->${secondhop}[${hopnum}]:\n";
+		    @delays = sort {$a<=>$b} keys %{$histo{$firsthop}{$secondhop}{$hopnum}};
+		    $total = 0;
+		    foreach $delay (@delays) {
+			$total += $histo{$firsthop}{$secondhop}{$hopnum}{$delay};
+		    }
+		    # XXX
+		    next if ($total == 0);
+		    $cumulative = 0;
+		    foreach $delay (@delays) {
+			$bucket = $histo{$firsthop}{$secondhop}{$hopnum}{$delay};
+			$cumulative += $bucket;
+			printf("%-5.5s %3.3s %5d %6.1f%% %6.1f%%\n", ($delay == 9999999 ? "Over" : ($cumulative == $bucket ? "Under" : "")), ($delay == 9999999 ? "1d" : scaletime($delay)), $bucket, $bucket * 100.0 / $total, $cumulative * 100.0 / $total);
+		    }
+		    print "\n";
+		}
+	    }
+	}
+	#print Dumper(\%histo);
+}
 
+sub bucket {
+	local($prevdate, $date) = @_;
+	local($b);
+	if ($prevdate == -1 || $date == -1) {
+		return 0;
+	}
+	foreach $b (@buckets) {
+		return $b if ($b > ($prevdate - $date));
+	}
+	return 9999999;
+}
 sub hop {
 	local($prevdate, $prevhop, $date, $hop) = @_;
 
-	push(@output, [($prevdate == -1 || $date == -1) ?
-				"?" : &scaletime($prevdate - $date),
-			($hop) ? "${hop}->${prevhop}" : $prevhop]);
+	if ($histogram) {
+		push(@output, [ bucket($prevdate, $date), $hop, $prevhop ]);
+	} else {
+		push(@output, [($prevdate == -1 || $date == -1) ?
+					"?" : &scaletime($prevdate - $date),
+				($hop) ? "${hop}->${prevhop}" : $prevhop]);
+	}
 }
 
 sub scaletime {
