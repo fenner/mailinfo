@@ -64,7 +64,7 @@ while (<>) {
 	} else {
 		if ($origdate > 0) {
 			if ($prevdate - $origdate) {
-				hop($origdate, "MUA", $prevdate, $prevhop);
+				hop($prevdate, $prevhop, $origdate, "MUA");
 			}
 			hop($lastdate, "end2end", $origdate);
 		}
