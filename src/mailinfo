@@ -38,7 +38,7 @@ while (<>) {
 		# and nothing else.
 		$qmail = ($& =~ /qmail/);
 		($by) = ($prevline =~ /\bby\s+([^;, 	]+)/i);
-		($id) = ($prevline =~ /id\s+([^; ]+)/i);
+		($id) = ($prevline =~ /id\s+([^; 	]+)/i);
 		($dat) = ($prevline =~ /; (.*)$/);
 		# If we don't have a "by", then take the previous header's
 		# "from" if it's present.
