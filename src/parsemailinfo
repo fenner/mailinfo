@@ -1,0 +1,112 @@
+#!/usr/bin/perl -s
+#
+# Use "-n" to not scale times but still output 'human-readable'
+# Use "-g" to output a graphable format, with the form
+#   <x> <lasthoptime> <prevhoptime> <roundtriptime>
+# so you can graph using "1:2", "1:3", "1:4"
+# Use "-o" to use the date sent instead of the date received when calculating x
+# Use "-d" to calculate x in fractional days
+# Use "-t" to output in alternate format.
+#
+# $Id$
+
+@times = (31536000, 604800, 86400, 3600, 60, 1);
+@names = ('y', 'w', 'd', 'h', 'm', 's');
+
+$dontscale = $n;
+$graphoutput = $g;
+$useorigdate = $o;
+$usedays = $d;
+$debug = $x;
+$outputformat = $t;
+
+while (<>) {
+	chop;
+	($msgid,$_)=split(/\t/,$_,2);
+	print("message $msgid", $outputformat ? "\n" : " ") unless $graphoutput;
+	$lastdate = 0;
+	$prevhop = "";
+	@deltas = () if ($graphoutput);
+	@output = ();
+	print "line is >>$_<<\n" if ($debug);
+	while ($_) {
+		($cur, $_) = split(/\t/,$_,2);
+		print "Working on >>$cur<<\n" if ($debug);
+		if ($cur =~ /^date /) {
+			$origdate = (split(/ /,$cur,2))[1];
+			last;
+		}
+		($hop,$id,$date) = split(/ /,$cur);
+		$lastdate = $date unless $lastdate;
+		if ($prevhop) {
+			if ($graphoutput) {
+				# XXX deal with unknown values
+				push(@deltas, $prevdate - $date);
+			} else {
+				hop($prevdate, $prevhop, $date, $hop);
+			}
+		}
+		$prevhop = $hop;
+		$prevdate = $date;
+	}
+	if ($graphoutput) {
+# want hour of day in local time of lastdate (when we got it)
+# use "-o" to use origdate
+		next if (!$origdate);
+		($min,$hr,$day,$doy) = (localtime($useorigdate ? $origdate : $lastdate))[1,2,3,7];
+		if ($usedays) {
+			printf("%f", $doy + $hr / 24 + $min / 1440);
+		} else {
+			printf("%d", $hr);
+		}
+		printf " %d %d", $deltas[0], $deltas[1];
+		print " ", $lastdate - $origdate, "\n";
+	} else {
+		if ($origdate > 0) {
+			if ($prevdate - $origdate) {
+				hop($origdate, "MUA", $prevdate, $prevhop);
+			}
+			hop($lastdate, "end2end", $origdate);
+		}
+		if ($outputformat) {
+			foreach $line (reverse @output) {
+				$$line[0] =~ s/([^-0-9])(\d)/$1 $2/g;
+				$$line[1] =~ s/->/ -> /;
+				$$line[1] =~ s/end2end/end to end/;
+				printf("%12s %s\n", $$line[0], $$line[1]);
+			}
+		} else {
+			foreach $line (reverse @output) {
+				printf(" %s %s", $$line[0], $$line[1]);
+			}
+			print "\n";
+		}
+	}
+}
+
+sub hop {
+	local($prevdate, $prevhop, $date, $hop) = @_;
+
+	push(@output, [($prevdate == -1 || $date == -1) ?
+				"?" : &scaletime($prevdate - $date),
+			($hop) ? "${hop}->${prevhop}" : $prevhop]);
+}
+
+sub scaletime {
+	local($time) = @_;
+	local($retval) = "";
+
+	return $time if ($dontscale);
+
+	if ($time < 0) {
+		$retval = "-";
+		$time = -$time;
+	}
+	for ($i = 0; $i <= $#times; $i++) {
+		if ($time >= $times[$i]) {
+			$retval .= sprintf("%d%s", $time / $times[$i], $names[$i]);
+			$time %= $times[$i];
+		}
+	}
+	return $retval || "0s";
+}
