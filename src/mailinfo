@@ -20,6 +20,7 @@ $debug = $d;
 
 
 $prevline = "";
+$from = "";
 $ndx = 0;
 while (<>) {
 	chop;
@@ -31,25 +32,21 @@ while (<>) {
 		$msgid = $1;
 	} elsif ($prevline =~ /^Received:/i) {
 		print("rcvd hdr: $prevline\n") if ($debug);
-		#XXX omega/alpha hack; omega thinks its name is alpha
-		#Received: from alpha.xerox.com ([13.1.64.95]) ...
-		if ($prevline =~ /from\s+alpha.xerox.com\s+\(.*\[13.1.64.95\].*\)/i) {
-			$by[$ndx + 1] = "omega.xerox.com";
-		}
 		# Get rid of parenthesis
 		$prevline =~ s/\([^)]*\)//g;
-		#!!
+		# Some hops just have a parenthetical qmail notation
+		# and nothing else.
 		$qmail = ($& =~ /qmail/);
 		($by) = ($prevline =~ /\bby\s+([^;, 	]+)/i);
-		#XXX omega/alpha hack
-		if ($by =~ /alpha.xerox.com/i && $by[$ndx] eq "omega.xerox.com") {
-			$by = $by[$ndx];
-		}
 		($id) = ($prevline =~ /id\s+([^; ]+)/i);
 		($dat) = ($prevline =~ /; (.*)$/);
-		$by[$ndx] = $by || ($qmail ? "qmail" : "unknown");
+		# If we don't have a "by", then take the previous header's
+		# "from" if it's present.
+		$by[$ndx] = $by || ( ($qmail ? "qmail" : "unknown") . ($from ? "\@${from}?" : "" ) );
 		$id[$ndx] = $id || "no-id";
+		$from[$ndx] = $from;
 		$date[$ndx++] = $dat;
+		($from) = ($prevline =~ /\bfrom\s+([^;, 	]+)/i);
 		print("by $by[$ndx - 1] id $id[$ndx - 1] date $date[$ndx - 1]\n") if ($debug);
 	} elsif ($prevline =~ /^(Resent-)?Date:\s+(.*)/i) {
 print if ($debug);
