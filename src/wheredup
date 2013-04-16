@@ -1,0 +1,63 @@
+#!/usr/bin/perl
+#
+# Given a list of files containing apparently-identical email messages,
+# figure out where the path changes (different hop or queue ID)
+#
+# For now, compare each message against the first.  Later maybe
+# come up with a better algorithm.
+#
+# Bill Fenner <fenner@research.att.com>
+# November 22, 2002
+#
+# $Id$
+#
+use Data::Dumper;
+
+$arglist = join(",",@ARGV);
+$arglist =~ s/-/../g;
+@ARGV = eval "( $arglist )";
+
+for ($i = 0; $i <= $#ARGV; $i++) {
+	$mailinfo = `mailinfo $ARGV[$i]`;
+	($msgid, @h) = split(/\t/, $mailinfo);
+	grep (($_ = [ split(/\s/, $_) ], 0), @h);
+	@{$hops[$i]} = reverse(@h);
+	# XXX mailinfo fixup
+	if ($hops[$i]->[0]->[0] eq "date" && $hops[$i]->[0]->[2] eq "") {
+		$hops[$i]->[0]->[2] = $hops[$i]->[0]->[1];
+		$hops[$i]->[0]->[1] = "no-id";
+		$hops[$i]->[0]->[0] = "MUA_Date_header";
+	}
+	$msgid[$i] = $msgid;
+}
+
+print "Message ${ARGV[0]} path:\n";
+for ($hop = 0; $hop <= $#{$hops[0]}; $hop++) {
+	print "#${hop}: $hops[0]->[$hop]->[0] id $hops[0]->[$hop]->[1] at ", scalar(localtime($hops[0]->[$hop]->[2])), "\n";
+}
+
+# Need better algorithm
+msg:
+for ($i = 1; $i <= $#ARGV; $i++) {
+	if ($msgid[$i] ne $msgid[0]) {
+		print "${ARGV[$i]}: different message-ID: $msgid[$i] vs $msgid[0]\n";
+		next msg;
+	}
+	hop:
+	for ($hop = 0; $hop <= $#{$hops[0]}; $hop++) {
+		if ($hops[0]->[$hop]->[0] ne $hops[$i]->[$hop]->[0]) {
+			print "${ARGV[$i]}: different hop #${hop}: $hops[$i]->[$hop]->[0] vs $hops[0]->[$hop]->[0]\n";
+			next msg;
+		}
+		if ($hops[0]->[$hop]->[1] ne $hops[$i]->[$hop]->[1]) {
+			print "${ARGV[$i]}: different id at hop #${hop} ($hops[0]->[$hop]->[0]): $hops[$i]->[$hop]->[1] vs $hops[0]->[$hop]->[1]\n";
+			next msg;
+		}
+		if ($hops[0]->[$hop]->[2] ne $hops[$i]->[$hop]->[2]) {
+			print "${ARGV[$i]}: different timestamp at hop #${hop} ($hops[0]->[$hop]->[0]): ", scalar(localtime($hops[$i]->[$hop]->[2])), " vs ", scalar(localtime($hops[0]->[$hop]->[2])), "\n";
+			next msg;
+		}
+	}
+	print "${ARGV[$i]}: path compares the same.\n";
+}
+
