@@ -9,7 +9,7 @@
 # one field per hop, with 3 space-seperated fields: hostname, queue ID, time
 # final field of message Date: header
 
-require 'timelocal.pl';
+use Time::Local;
 
 $debug = $d;
 
